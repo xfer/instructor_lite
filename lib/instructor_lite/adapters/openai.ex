@@ -182,4 +182,19 @@ defmodule InstructorLite.Adapters.OpenAI do
         {:error, :unexpected_response, other}
     end
   end
+
+  @doc """
+  Extract usage information from OpenAI API response.
+
+  Returns token usage statistics if available in the response.
+  """
+  @impl InstructorLite.Adapter
+  def extract_usage(response) when is_map(response) do
+    case response do
+      %{"usage" => usage} when is_map(usage) -> usage
+      _ -> nil
+    end
+  end
+
+  def extract_usage(_), do: nil
 end

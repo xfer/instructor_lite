@@ -61,11 +61,19 @@ defmodule InstructorLite.Adapter do
   Find text output in the response.
 
   Similar to `parse_response/2`, but this callback assumes a simple plain text
-  response. Used in `InstructorLite.ask/2` function. 
+  response. Used in `InstructorLite.ask/2` function.
   """
   @doc since: "1.1.0"
   @callback find_output(response(), InstructorLite.opts()) ::
               {:ok, String.t()} | {:error, any()} | {:error, reason :: atom(), any()}
 
-  @optional_callbacks [find_output: 2]
+  @doc """
+  Extract usage information from API response.
+
+  Returns a map with usage statistics (e.g., token counts) or nil if not available.
+  This callback is optional - adapters that don't implement it will have empty usage data.
+  """
+  @callback extract_usage(response()) :: map() | nil
+
+  @optional_callbacks [find_output: 2, extract_usage: 1]
 end

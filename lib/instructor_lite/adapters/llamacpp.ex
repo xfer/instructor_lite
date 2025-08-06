@@ -129,4 +129,19 @@ defmodule InstructorLite.Adapters.Llamacpp do
         {:error, :unexpected_response, other}
     end
   end
+
+  @doc """
+  Extract usage information from Llamacpp API response.
+
+  Returns token usage statistics if available in the response.
+  """
+  @impl InstructorLite.Adapter
+  def extract_usage(response) when is_map(response) do
+    case response do
+      %{"usage" => usage} when is_map(usage) -> usage
+      _ -> nil
+    end
+  end
+
+  def extract_usage(_), do: nil
 end

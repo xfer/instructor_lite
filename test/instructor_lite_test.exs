@@ -106,6 +106,7 @@ defmodule InstructorLiteTest do
 
       validate = fn %Ecto.Changeset{} = cs, opts ->
         assert [
+                 include_usage: false,
                  max_retries: 0,
                  adapter: MockAdapter,
                  response_model: %{name: :string},
@@ -168,7 +169,7 @@ defmodule InstructorLiteTest do
       |> expect(:initial_prompt, fn _json_schema, _params -> params end)
       |> expect(:send_request, fn p, opts ->
         assert params == p
-        assert opts == [{:max_retries, 0} | options]
+        assert opts == [{:include_usage, false}, {:max_retries, 0} | options]
 
         {:ok, :response_body}
       end)

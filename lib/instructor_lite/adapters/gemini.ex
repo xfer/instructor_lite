@@ -180,4 +180,19 @@ defmodule InstructorLite.Adapters.Gemini do
         {:error, :unexpected_response, other}
     end
   end
+
+  @doc """
+  Extract usage information from Gemini API response.
+
+  Returns token usage statistics from the `usageMetadata` field if available.
+  """
+  @impl InstructorLite.Adapter
+  def extract_usage(response) when is_map(response) do
+    case response do
+      %{"usageMetadata" => usage} when is_map(usage) -> usage
+      _ -> nil
+    end
+  end
+
+  def extract_usage(_), do: nil
 end

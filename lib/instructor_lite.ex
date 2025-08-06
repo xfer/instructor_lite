@@ -48,6 +48,12 @@ defmodule InstructorLite do
                    type: :map,
                    doc:
                      "JSON schema to use instead of calling response_model.json_schema/0 callback or generating it at runtime using `InstructorLite.JSONSchema` module"
+                 ],
+                 include_usage: [
+                   type: :boolean,
+                   default: false,
+                   doc:
+                     "Include token usage statistics in the response. When enabled, returns `{:ok, data, metadata}` instead of `{:ok, data}`, where metadata contains `total` and `attempts` keys with usage information."
                  ]
                ] ++ @ask_options
 
@@ -193,16 +199,58 @@ defmodule InstructorLite do
   )
   {:ok, %Rhymes{word: "heart", rhymes: ["part", "start", "dart"]}}
   ```
+
+  ### Using `include_usage` to track token usage
+
+  ```
+  # Track token usage across all attempts
+  {:ok, result, metadata} = InstructorLite.instruct(%{
+      messages: [
+        %{role: "user", content: "Extract the name and age from: John is 25 years old"}
+      ]
+    },
+    response_model: %{name: :string, age: :integer},
+    include_usage: true,
+    adapter: InstructorLite.Adapters.Anthropic,
+    adapter_context: [api_key: Application.fetch_env!(:instructor_lite, :anthropic_key)]
+  )
+
+  # metadata will contain:
+  # %{
+  #   total: %{"input_tokens" => 150, "output_tokens" => 20},
+  #   attempts: [
+  #     %{"input_tokens" => 150, "output_tokens" => 20}
+  #   ]
+  # }
+
+  # With retries, usage is aggregated
+  {:ok, result, metadata} = InstructorLite.instruct(params,
+    response_model: MySchema,
+    include_usage: true,
+    max_retries: 2,
+    adapter_context: [api_key: key]
+  )
+
+  # metadata.total will sum tokens from all attempts
+  # metadata.attempts will list usage for each individual attempt
+  ```
   """
   @spec instruct(Adapter.params(), opts()) ::
           {:ok, Ecto.Schema.t()}
+          | {:ok, Ecto.Schema.t(), map()}
           | {:error, Ecto.Changeset.t()}
+          | {:error, Ecto.Changeset.t(), map()}
           | {:error, any()}
           | {:error, atom(), any()}
   def instruct(params, opts) do
     opts = NimbleOptions.validate!(opts, @options_schema)
     params = prepare_prompt(params, opts)
-    do_instruct(params, opts)
+
+    if opts[:include_usage] do
+      do_instruct_with_usage(params, opts, [])
+    else
+      do_instruct(params, opts)
+    end
   end
 
   defp do_instruct(params, opts) do
@@ -222,6 +270,66 @@ defmodule InstructorLite do
           error
       end
     end
+  end
+
+  defp do_instruct_with_usage(params, opts, usage_attempts) do
+    with {:ok, response} <- opts[:adapter].send_request(params, opts) do
+      # Extract usage from this attempt
+      current_usage = extract_usage_from_response(response, opts[:adapter])
+      updated_attempts = usage_attempts ++ [current_usage]
+
+      case consume_response(response, params, opts) do
+        {:error, %Ecto.Changeset{} = cs, new_params} ->
+          if opts[:max_retries] > 0 do
+            do_instruct_with_usage(
+              new_params,
+              Keyword.update!(opts, :max_retries, &(&1 - 1)),
+              updated_attempts
+            )
+          else
+            metadata = build_usage_metadata(updated_attempts)
+            {:error, cs, metadata}
+          end
+
+        {:ok, result} ->
+          metadata = build_usage_metadata(updated_attempts)
+          {:ok, result, metadata}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  defp extract_usage_from_response(response, adapter) do
+    if function_exported?(adapter, :extract_usage, 1) do
+      adapter.extract_usage(response) || %{}
+    else
+      %{}
+    end
+  end
+
+  defp build_usage_metadata(attempts) do
+    %{
+      total: sum_usage_attempts(attempts),
+      attempts: attempts
+    }
+  end
+
+  defp sum_usage_attempts(attempts) do
+    attempts
+    |> Enum.reduce(%{}, fn attempt, acc ->
+      Map.merge(acc, attempt, fn _key, v1, v2 ->
+        case {v1, v2} do
+          {n1, n2} when is_number(n1) and is_number(n2) -> n1 + n2
+          {_, n2} when is_number(n2) -> n2
+          {n1, _} when is_number(n1) -> n1
+          _ -> nil
+        end
+      end)
+    end)
+    |> Enum.filter(fn {_k, v} -> v != nil end)
+    |> Map.new()
   end
 
   @doc false
